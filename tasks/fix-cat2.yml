@@ -1877,7 +1877,7 @@
 - name: "MEDIUM | RHEL-08-010580 | PATCH | RHEL 8 must prevent special devices on non-root local partitions."
   block:
       - name: "MEDIUM | RHEL-08-010580 | PATCH | RHEL 8 must prevent special devices on non-root local partitions. | Get mounts"
-        ansible.builtin.shell: mount | grep '^/dev\S* on /\S' | grep --invert-match 'nodev' | awk '{print $1,$3,$5,$6}' | sed 's/[()]//g'
+        ansible.builtin.shell: mount | grep '^/dev\S* on /\S' | grep -v '/boot' | grep --invert-match 'nodev' | awk '{print $1,$3,$5,$6}' | sed 's/[()]//g'
         changed_when: false
         check_mode: false
         register: rhel8stig_010580_mounts_nodev
