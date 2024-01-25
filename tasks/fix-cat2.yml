@@ -1832,7 +1832,7 @@
   ansible.posix.mount:
       path: /boot
       state: mounted
-      src: "{{ boot_mount.device }}"
+      src: "UUID={{ boot_mount.uuid }}"
       fstype: "{{ boot_mount.fstype }}"
       opts: "{{ boot_mount.options }},nosuid"
   when:
