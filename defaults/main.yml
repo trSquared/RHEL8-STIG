@@ -1,6 +1,6 @@
 ---
 ## metadata for Audit benchmark
-benchmark_version: 'v1r11'
+benchmark_version: 'v1r13'
 
 ## Benchmark name used by audting control role
 # The audit variable found at the base
@@ -35,7 +35,6 @@ rhel8stig_audit_disruptive: false
 rhel8stig_skip_for_travis: false
 
 rhel8stig_workaround_for_disa_benchmark: true
-rhel8stig_workaround_for_ssg_benchmark: true
 
 # tweak role to run in a chroot, such as in kickstart %post script
 rhel8stig_system_is_chroot: "{{ ansible_is_chroot | default(False) }}"
@@ -56,27 +55,56 @@ rhel8stig_skip_reboot: true
 # Defined will change if control requires
 change_requires_reboot: false
 
-### Goss is required on the remote host
+###########################################
+### Goss is required on the remote host ###
+### vars/auditd.yml for other settings  ###
+
+# Allow audit to setup the requirements including installing git (if option chosen and downloading and adding goss binary to system)
 setup_audit: false
+
+# enable audits to run - this runs the audit and get the latest content
+run_audit: false
+# Run heavy tests - some tests can have more impact on a system enabling these can have greater impact on a system
+audit_run_heavy_tests: true
+
+## Only run Audit do not remediate
+audit_only: false
+### As part of audit_only ###
+# This will enable files to be copied back to control node in audit_only mode
+fetch_audit_files: false
+# Path to copy the files to will create dir structure in audit_only mode
+audit_capture_files_dir: /some/location to copy to on control node
+#############################
+
 # How to retrieve audit binary
 # Options are copy or download - detailed settings at the bottom of this file
 # you will need to access to either github or the file already dowmloaded
 get_audit_binary_method: download
 
+## if get_audit_binary_method - copy the following needs to be updated for your environment
+## it is expected that it will be copied from somewhere accessible to the control node
+## e.g copy from ansible control node to remote host
+audit_bin_copy_location: /some/accessible/path
+
 # how to get audit files onto host options
-# options are git/copy/get_url other e.g. if you wish to run from already downloaded conf
+# options are git/copy/archive/get_url other e.g. if you wish to run from already downloaded conf
 audit_content: git
 
-# enable audits to run - this  runs the audit and get the latest content
-run_audit: false
+# If using either archive, copy, get_url:
+## Note will work with .tar files - zip will require extra configuration
+### If using get_url this is expecting github url in tar.gz format e.g.
+### https://github.com/ansible-lockdown/UBUNTU22-CIS-Audit/archive/refs/heads/benchmark-v1.0.0.tar.gz
+audit_conf_source: "some path or url to copy from"
 
-# Run heavy tests - some tests can have more impact on a system enabling these can have greater impact on a system
-audit_run_heavy_tests: true
-# Timeout for those cmds that take longer to run where timeout set
-audit_cmd_timeout: 60000
+# Destination for the audit content to be placed on managed node
+# note may not need full path e.g. /opt with the directory being the {{ benchmark }}-Audit directory
+audit_conf_dest: "/opt"
 
-### End Goss enablements ####
-#### Detailed settings found at the end of this document ####
+# Where the audit logs are stored
+audit_log_dir: '/opt'
+
+### Goss Settings ##
+####### END ########
 
 # These variables correspond with the STIG IDs defined in the STIG and allows you to enable/disable specific rules.
 # PLEASE NOTE: These work in coordination with the cat1, cat2, cat3 group variables. You must enable an entire group
@@ -479,11 +507,6 @@ rhel8stig_kdump_needed: false
 # or rhel8stig_gui)
 rhel8stig_always_configure_dconf: false
 
-# Whether or not to run tasks related to smart card authentication enforcement
-rhel8stig_smartcard: false
-# Configure your smartcard driver
-rhel8stig_smartcarddriver: cackey
-
 # Set the file that sysctl should write to
 rhel8stig_sysctl_file: /etc/sysctl.d/99_stig_sysctl.conf
 
@@ -505,6 +528,11 @@ rhel8stig_ipv6_required: true
 # rhel8stig_av_sftw is the AV software package. When set to mcafee it enables the check for these packages
 # When set to anything other than mcafee it will skip this control assuming localized threat prevention management
 rhel8stig_av_sftw: mcafee
+
+# RHEL-08-010110 & 010130 & 010760 & 020190 & 020200 & 020231 & 020310 & 020351
+# rhel8stig_login_defs_file_perms
+# Permissions set on /etc/login.defs
+rhel8stig_login_defs_file_perms: 0644
 
 # RHEL-08-010210
 # rhel8stig_var_log_messages_perm is the permissions the /var/log/messages file is set to.
@@ -537,10 +565,6 @@ rhel8stig_ssh_pub_key_perm: 0644
 rhel8stig_ssh_priv_key_perm: 0600
 
 # RHEL-08-010690
-# Set standard user paths here
-# Also set whether we should automatically remediate paths in user ini files.
-# rhel_08_020720_user_path: "PATH=$PATH:$HOME/.local/bin:$HOME/bin"
-rhel8stig_standard_user_path: "PATH=$PATH:$HOME/.local/bin:$HOME/bin"
 rhel8stig_change_user_path: false
 
 # RHEL-08-010700
@@ -568,6 +592,19 @@ rhel8stig_local_int_home_file_perms: 0750
 # rhel8stig_local_int_perm is the permissions set to the local initialization files
 # To connform to STIG standards this needs to be set to 0740 or less permissive
 rhel8stig_local_int_perm: 0740
+
+# RHEL-08-020100 pamd file permissions - /etc/pam.d/(password-auth|system-auth) files
+# rhel8stig_pamd_file_perms
+# This needs a minimum of 0644 ( more restrictive may cause issues testing will be required)
+rhel8stig_pamd_file_perms: 0644
+
+# RHEL-08-020110 - pwquality file permissions
+# mode: "{{ rhel8stig_pamd_file_perms }}"
+rhel8stig_pwquality_file_perms: 0644
+
+# RHEL-08-0400xx
+# blacklist.conf - /etc/modprobe.d/blacklist.conf file permissions
+rhel8stig_blacklist_conf_file_perms: 0640
 
 # RHEL-08-020250
 # This is a check for a "supported release"
@@ -685,13 +722,6 @@ rhel8stig_sssd:
     maprule: (userCertificate;binary={cert!bin})
     domains: "{{ rhel8stig_sssd_domain }}"
 
-# RHEL-08-020070
-# Session timeout setting file (TMOUT setting can be set in multiple files)
-# Timeout value is in seconds. (60 seconds * 10 = 600)
-rhel8stig_shell_session_timeout:
-    file: /etc/profile.d/tmout.sh
-    timeout: 600
-
 # RHEL-08-010200 | All network connections associated with SSH traffic must
 # terminate at the end of the session or after 10 minutes of inactivity, except
 # to fulfill documented and validated mission requirements.
@@ -740,14 +770,6 @@ rhel8stig_pam_faillock:
 
 # RHEL-08-020035
 rhel_08_020035_idlesessiontimeout: 900
-
-# RHEL-08-030670
-# rhel8stig_audisp_disk_full_action options are syslog, halt, and single to fit STIG standards
-rhel8stig_audisp_disk_full_action: single
-
-# RHEL-08-030680
-# rhel8stig_audisp_network_failure_action optoins are syslog, halt, and single
-rhel8stig_audisp_network_failure_action: single
 
 # RHEL-08-030060
 # rhel8stig_auditd_disk_full_action options are SYSLOG, HALT, and SINGLE to fit STIG standards
@@ -856,20 +878,25 @@ rhel8stig_ntp_server_name: 0.us.pool.ntp.mil
 # rhel8stig_fapolicy_white_list is the whitelist for fapolicyd, the last item in the list must be dyny all all
 rhel8stig_fapolicy_white_list:
     - 'deny_audit perm=any pattern=ld_so : all'
-    - deny all all
+    - 'deny perm=any all : all'
 
 # RHEL-08-040090
 # rhel8stig_custom_firewall_zone is the desired name for the new customer firewall zone
 rhel8stig_custom_firewall_zone: "new_fw_zone"
 
+# rhel8stig_copy_existing_zone - if you wish to copy an existing zones rules to the new zone
+rhel8stig_copy_existing_zone: true
+# rhel8stig_existing_zone_to_copy - name of the zone that you wish to copy from
+rhel8stig_existing_zone_to_copy: public
+
 # RHEL-08-040090
-# rhel8stig_white_list_services is the services that you want to allow through initially for teh new firewall zone
-# http and ssh need to be enabled for the role to run.
+# This designed not work with rhel8stig_existing_zone_to_copy and when deploy new rules
+# rhel8stig_white_list_services is the services that you want to allow through initially for the new firewall zone
 # This can also be a port number if no service exists
 rhel8stig_white_list_services:
+    - ssh
     - http
     - https
-    - ssh
 
 # RHEL-08-010290
 # RHEL-08-010290
@@ -881,11 +908,6 @@ rhel8stig_ssh_ciphers: "Ciphers=aes256-ctr,aes192-ctr,aes128-ctr,aes256-gcm@open
 # RHEL-08-040342
 # Expected Values for FIPS KEX algorithims
 rhel8stig_ssh_kex: "KexAlgorithms=ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512"
-
-# This will be the CRYPTO_POLICY settings in the opensshserver.conf file. It will be a string for the entirety of the setting
-# to conform to STIG standard control RHEL-08-010290 this variable must contain oCiphers=aes256-ctr,aes192-ctr,aes128-ctr -oMACS=hmac-sha2-512,hmac-sha2-256 settings
-# to conform to STIG standard control RHEL-08-010291 this variable must cotnain oCiphers=aes256-ctr,aes192-ctr,aes128-ctr
-rhel8stig_ssh_server_crypto_settings: "-oCiphers=aes256-ctr,aes192-ctr,aes128-ctr -oMACS=hmac-sha2-512,hmac-sha2-256"
 
 # RHEL-08-010295
 # This will be teh GnuTLS ecryption packages. The task sets the +VERS-ALL: setting, the only items needed are the DoD approved encryptions
@@ -900,55 +922,3 @@ rhel8stig_tmux_lock_after_time: 900
 # The value given to Defaults timestamp timeout= in the sudo file.
 # Value must be greater than 0 to conform to STIG standards
 rhel8stig_sudo_timestamp_timeout: 1
-
-#### Goss Configuration Settings ####
-# Set correct env for the run_audit.sh script from https://github.com/ansible-lockdown/{{ benchmark }}-Audit.git"
-audit_run_script_environment:
-    AUDIT_BIN: "{{ audit_bin }}"
-    AUDIT_FILE: 'goss.yml'
-    AUDIT_CONTENT_LOCATION: "{{ audit_out_dir }}"
-
-### Goss binary settings ###
-audit_bin_version:
-    release: v0.3.23
-    checksum: 'sha256:9e9f24e25f86d6adf2e669a9ffbe8c3d7b9b439f5f877500dea02ba837e10e4d'
-audit_bin_path: /usr/local/bin/
-audit_bin: "{{ audit_bin_path }}goss"
-audit_format: json
-
-# if get_audit_binary_method == download change accordingly
-audit_bin_url: "https://github.com/goss-org/goss/releases/download/{{ audit_bin_version.release }}/goss-linux-amd64"
-
-## if get_audit_binary_method - copy the following needs to be updated for your environment
-## it is expected that it will be copied from somewhere accessible to the control node
-## e.g copy from ansible control node to remote host
-audit_bin_copy_location: /some/accessible/path
-
-#### Goss Audit Benchmark file ###
-## managed by the control audit_content
-# git
-audit_file_git: "https://github.com/ansible-lockdown/{{ benchmark }}-Audit.git"
-audit_git_version: "benchmark_{{ benchmark_version }}_rh8"
-
-# archive or copy:
-audit_conf_copy: "some path to copy from"
-
-# get_url:
-audit_files_url: "some url maybe s3?"
-
-## Goss configuration information
-# Where the goss configs and outputs are stored
-audit_out_dir: '/opt'
-# Where the goss audit configuration will be stored
-audit_conf_dir: "{{ audit_out_dir }}/{{ benchmark }}-Audit"
-
-# If changed these can affect other products
-pre_audit_outfile: "{{ audit_out_dir }}/{{ ansible_hostname }}-{{ benchmark }}-{{ benchmark_version }}_pre_scan_{{ ansible_date_time.epoch }}.{{ audit_format }}"
-post_audit_outfile: "{{ audit_out_dir }}/{{ ansible_hostname }}-{{ benchmark }}-{{ benchmark_version }}_post_scan_{{ ansible_date_time.epoch }}.{{ audit_format }}"
-
-## The following should not need changing
-audit_vars_path: "{{ audit_conf_dir }}/vars/{{ ansible_hostname }}.yml"
-audit_results: |
-      The pre remediation results are: {{ pre_audit_summary }}.
-      The post remediation results are: {{ post_audit_summary }}.
-      Full breakdown can be found in {{ audit_out_dir }}

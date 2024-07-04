@@ -1,9 +1,19 @@
 ---
+
+- name: change_requires_reboot
+  ansible.builtin.set_fact:
+      change_requires_reboot: true
+
 - name: systemctl daemon-reload
   ansible.builtin.systemd:
       daemon_reload: true
   when:
       - not system_is_container
+
+- name: Restart_systemdlogin
+  ansible.builtin.systemd:
+      name: systemd-logind
+      state: restarted
 
 - name: sysctl system
   ansible.builtin.shell: sysctl --system
@@ -16,6 +26,7 @@
   when:
       - not rhel8stig_system_is_chroot
       - "'openssh-server' in ansible_facts.packages"
+      - not change_requires_reboot
 
 - name: restart sssd
   ansible.builtin.service:
@@ -30,6 +41,7 @@
       state: restarted
   when:
       - not rhel8stig_system_is_chroot
+      - not change_requires_reboot
 
 - name: restart rsyslog
   ansible.builtin.service:
@@ -67,7 +79,7 @@
       remote_src: true
       owner: root
       group: root
-      mode: 0755
+      mode: '0755'
   when:
       - rhel8stig_grub2_user_cfg.stat.exists
       - rhel8stig_workaround_for_disa_benchmark
@@ -82,6 +94,7 @@
       - not rhel8stig_skip_for_travis
       - not rhel8stig_system_is_chroot
       - not system_is_container
+      - not change_requires_reboot
 
 - name: update auditd
   ansible.builtin.template:
@@ -89,7 +102,7 @@
       dest: /etc/audit/rules.d/99_auditd.rules
       owner: root
       group: root
-      mode: 0600
+      mode: '0600'
   notify: restart auditd
 
 - name: restart auditd
@@ -98,6 +111,7 @@
       - not rhel8stig_skip_for_travis
       - not rhel8stig_system_is_chroot
       - not system_is_container
+      - not change_requires_reboot
 
 - name: rebuild initramfs
   ansible.builtin.shell: dracut -f
@@ -146,7 +160,3 @@
   ansible.builtin.debug:
       msg: "Post-run OpenSCAP score is {{ rhel8stig_postscanresults.Benchmark.TestResult.score['#text'] }}"
   when: rhel8stig_oscap_scan
-
-- name: change_requires_reboot
-  ansible.builtin.set_fact:
-      change_requires_reboot: true

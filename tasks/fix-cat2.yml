@@ -25,7 +25,7 @@
       - CAT2
       - CCI-001233
       - SRG-OS-000191-GPOS-00080
-      - SV-245540r754730_rule
+      - SV-245540r942951_rule
       - V-245540
 
 - name: "MEDIUM | RHEL-08-010010 | PATCH | RHEL 8 vendor packaged system security patches and updates must be installed and up to date."
@@ -112,6 +112,7 @@
             path: /etc/ssh/sshd_config
             regexp: '(?i)^#?Banner'
             line: 'Banner /etc/issue'
+            validate: '/usr/sbin/sshd -T -f %s'
         when:
             - rhel8stig_ssh_required
 
@@ -193,7 +194,8 @@
 - name: "MEDIUM | RHEL-08-010070 | PATCH | All RHEL 8 remote access methods must be monitored."
   ansible.builtin.lineinfile:
       path: /etc/rsyslog.conf
-      line: "auth.*;authpriv.*;daemon.* /var/log/secure"
+      regexp: ^(?!#).*\/var\/log\/secure
+      line: 'auth.*;authpriv.*;daemon.* /var/log/secure'
       create: true
       mode: '0644'
   notify: restart rsyslog
@@ -261,6 +263,9 @@
       path: /etc/login.defs
       regexp: '^ENCRYPT_METHOD.*'
       line: "ENCRYPT_METHOD {{ rhel8stig_login_defaults.encrypt_method | default('SHA512') }}"
+      owner: root
+      group: root
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_010110
   tags:
@@ -312,6 +317,9 @@
       path: /etc/login.defs
       regexp: ^.*SHA_CRYPT_MIN_ROUNDS\s
       line: SHA_CRYPT_MIN_ROUNDS {{ rhel8stig_hashing_rounds }}
+      owner: root
+      group: root
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_010130
   tags:
@@ -331,7 +339,7 @@
       dest: /etc/grub.d/01_users
       owner: root
       group: root
-      mode: 0755
+      mode: '0755'
   notify: confirm grub2 user cfg
   when:
       - rhel_08_010141 or
@@ -356,7 +364,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: '0644'
   when:
       - rhel_08_010151
   tags:
@@ -376,7 +384,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: '0644'
   when:
       - rhel_08_010152
   tags:
@@ -429,19 +437,18 @@
 - name: "MEDIUM | RHEL-08-010161 | PATCH | RHEL 8 must prevent system daemons from using Kerberos for authentication."
   block:
       - name: "MEDIUM | RHEL-08-010161 | AUDIT | RHEL 8 must prevent system daemons from using Kerberos for authentication. | Find .keytab files"
-        ansible.builtin.find:
-            path: /
-            patterns: '*.keytab'
-            recurse: true
+        ansible.builtin.shell: find / -name *.keytab
+        changed_when: false
+        failed_when: rhel8stig_010161_keytab_files.rc not in [ 0, 1 ]
         register: rhel8stig_010161_keytab_files
 
       - name: "MEDIUM | RHEL-08-010161 | PATCH | RHEL 8 must prevent system daemons from using Kerberos for authentication. | Remove .keytab files"
         ansible.builtin.file:
-            path: "{{ item.path }}"
+            path: "{{ item }}"
             state: absent
         with_items:
-            - "{{ rhel8stig_010161_keytab_files.files }}"
-        when: rhel8stig_010161_keytab_files.matched > 0
+            - "{{ rhel8stig_010161_keytab_files.stdout_lines }}"
+        when: rhel8stig_010161_keytab_files.stdout | length > 0
   when:
       - rhel_08_010161
   tags:
@@ -524,6 +531,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?ClientAliveCountMax.*'
       line: ClientAliveCountMax 1
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010200
@@ -542,6 +550,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?ClientAliveInterval.*'
       line: "ClientAliveInterval {{ rhel8stig_ssh_session_timeout }}"
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010201
@@ -809,7 +818,6 @@
 
       - name: "MEDIUM | RHEL-08-010293 | PATCH | The RHEL 8 operating system must implement DoD-approved encryption in the OpenSSL package. | Enable FIPS"
         ansible.builtin.shell: fips-mode-setup --enable
-        register: rhel_08_010290_fips_enable
         notify: change_requires_reboot
         when: '"disabled" in rhel_08_010293_pre_fips_check.stdout'
   when:
@@ -1222,7 +1230,9 @@
             regexp: '^kernel.kexec_load_disabled = 0'
             state: absent
         loop: "{{ rhel_08_010372_conflicting_settings.stdout_lines }}"
-        when: rhel_08_010372_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_010372_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
   when:
       - rhel_08_010372
   tags:
@@ -1248,7 +1258,9 @@
             regexp: '^fs.protected_symlinks = 0'
             state: absent
         loop: "{{ rhel_08_010373_conflicting_settings.stdout_lines }}"
-        when: rhel_08_010373_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_010373_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-010373 | PATCH | RHEL 8 must enable kernel parameters to enforce discretionary access control on symlinks. | Set sysctl"
         ansible.posix.sysctl:
@@ -1283,7 +1295,9 @@
             regexp: '^fs.protected_hardlinks = 0'
             state: absent
         loop: "{{ rhel_08_010374_conflicting_settings.stdout_lines }}"
-        when: rhel_08_010374_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_010374_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-010374 | PATCH | RHEL 8 must enable kernel parameters to enforce discretionary access control on hardlinks."
         ansible.posix.sysctl:
@@ -1572,7 +1586,9 @@
             regexp: "kernel.randomize_va_space = [^2]"
             state: absent
         loop: "{{ rhel_08_010430_conflicting_settings.stdout_lines }}"
-        when: rhel_08_010430_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_010430_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: " MEDIUM | RHEL-08-010430 | PATCH | RHEL 8 must implement address space layout randomization (ASLR) to protect its memory from unauthorized code execution. | Use template to create file"
         ansible.posix.sysctl:
@@ -1596,25 +1612,19 @@
 - name: "MEDIUM | RHEL-08-010480 | PATCH | The RHEL 8 SSH public host key files must have mode 0644 or less permissive."
   block:
       - name: "MEDIUM | RHEL-08-010480 | AUDIT | The RHEL 8 SSH public host key files must have mode 0644 or less permissive. | Find files"
-        ansible.builtin.find:
-            paths: /etc/ssh
-            recurse: true
-            file_type: file
-            patterns: 'ssh_host*_key.pub'
-            hidden: true
+        ansible.builtin.shell: find /etc/ssh -name ssh_host*_key.pub
         changed_when: false
-        failed_when: false
+        failed_when: rhel_08_010480_public_files.rc not in [ 0, 1 ]
         register: rhel_08_010480_public_files
 
       - name: "MEDIUM | RHEL-08-010480 | PATCH | The RHEL 8 SSH public host key files must have mode 0644 or less permissive. | Set permissions"
         ansible.builtin.file:
-            path: "{{ item.path }}"
+            path: "{{ item }}"
             mode: "{{ rhel8stig_ssh_pub_key_perm }}"
         with_items:
-            - "{{ rhel_08_010480_public_files.files }}"
-        loop_control:
-            label: "{{ item.path }}"
+            - "{{ rhel_08_010480_public_files.stdout_lines }}"
         notify: restart sshd
+        when: rhel_08_010480_public_files.stdout | length > 0
   when:
       - rhel_08_010480
       - rhel8stig_ssh_required
@@ -1630,25 +1640,19 @@
 - name: "MEDIUM | RHEL-08-010490 | PATCH | The RHEL 8 SSH private host key files must have mode 0640 or less permissive."
   block:
       - name: "MEDIUM | RHEL-08-010490 | AUDIT | The RHEL 8 SSH private host key files must have mode 0640 or less permissive. | Find files"
-        ansible.builtin.find:
-            paths: /etc/ssh
-            recurse: true
-            file_type: file
-            patterns: 'ssh_host*key'
-            hidden: true
+        ansible.builtin.shell: find /etc/ssh -name ssh_host*_key
         changed_when: false
-        failed_when: false
+        failed_when: rhel_08_010490_private_host_key_files.rc not in [ 0, 1 ]
         register: rhel_08_010490_private_host_key_files
 
       - name: "MEDIUM | RHEL-08-010490 | PATCH | The RHEL 8 SSH private host key files must have mode 0640 or less permissive. | Set permissions"
         ansible.builtin.file:
-            path: "{{ item.path }}"
+            path: "{{ item }}"
             mode: "{{ rhel8stig_ssh_priv_key_perm }}"
         with_items:
-            - "{{ rhel_08_010490_private_host_key_files.files }}"
-        loop_control:
-            label: "{{ item.path }}"
+            - "{{ rhel_08_010490_private_host_key_files.stdout_lines }}"
         notify: restart sshd
+        when: rhel_08_010490_private_host_key_files.stdout | length > 0
   when:
       - rhel_08_010490
       - rhel8stig_ssh_required
@@ -1666,6 +1670,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?StrictModes'
       line: 'StrictModes yes'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010500
@@ -1684,6 +1689,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?IgnoreUserKnownHosts'
       line: 'IgnoreUserKnownHosts yes'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010520
@@ -1702,6 +1708,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?KerberosAuthentication'
       line: "KerberosAuthentication no"
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010521
@@ -1720,6 +1727,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?GSSAPIAuthentication'
       line: "GSSAPIAuthentication no"
+      validate: '/usr/sbin/sshd -T -f %s'
   when:
       - rhel_08_010522
       - rhel8stig_ssh_required
@@ -1776,6 +1784,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?PermitRootLogin'
       line: 'PermitRootLogin no'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010550
@@ -2191,7 +2200,6 @@
   when:
       - rhel_08_010660
       - rhel8stig_disruption_high
-      # - rhel_08_stig_interactive_homedir_inifiles is defined
   tags:
       - RHEL-08-010660
       - CAT2
@@ -2233,7 +2241,9 @@
             regexp: kernel.core_pattern\s*=\s*.*(?<!\|\/bin\/false)$
             state: absent
         loop: "{{ rhel_08_010671_conflicting_settings.stdout_lines }}"
-        when: rhel_08_010671_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_010671_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-010671 | PATCH | RHEL 8 must disable the kernel.core_pattern."
         ansible.posix.sysctl:
@@ -2373,7 +2383,7 @@
             dest: /etc/resolv.conf
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
         when:
             - rhel_08_010680_networkmanager_check.stdout == '0'
             - rhel8_stig_use_resolv_template
@@ -2402,7 +2412,7 @@
   block:
       - name: "MEDIUM | RHEL-08-010690 | AUDIT | Executable search paths within the initialization files of all local interactive RHEL 8 users must only contain paths that resolve to the system default or the users home directory. | Find path files"
         ansible.builtin.shell: find "{{ item }}" -maxdepth 1 -type f | xargs grep "PATH=" | cut -d':' -f1 | xargs realpath
-        with_items: "{{ rhel_08_stig_interactive_homedir_results }}"
+        with_items: "{{ discovered_interactive_users_home.stdout_list }}"
         register: rhel_08_010690_ini_path_grep_list
         changed_when: false
         failed_when: false
@@ -2519,15 +2529,31 @@
       - SV-230320r627750_rule
       - V-230320
 
+# Required for RHEL-08-010730
+- name: "MEDIUM | RHEL-08-010750 | PATCH | All RHEL 8 local interactive user home directories defined in the /etc/passwd file must exist."
+  ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+  with_items: "{{ discovered_interactive_users_home.stdout_lines }}"
+  when:
+      - rhel_08_010750
+  tags:
+      - RHEL-08-010750
+      - CAT2
+      - CCI-000366
+      - SRG-OS-000480-GPOS-00227
+      - SV-230323r627750_rule
+      - V-230323
+      - permissions
+
 - name: "MEDIUM | RHEL-08-010730 | PATCH | All RHEL 8 local interactive user home directories must have mode 0750 or less permissive."
   ansible.builtin.file:
       path: "{{ item }}"
       mode: "{{ rhel8stig_local_int_home_perms }}"
   with_items:
-      - "{{ local_home_directories.stdout_lines }}"
+      - "{{ discovered_interactive_users_home.stdout_lines }}"
   when:
       - rhel_08_010730
-      - local_home_directories.stdout | length > 0
   tags:
       - RHEL-08-010730
       - CAT2
@@ -2539,20 +2565,12 @@
 
 - name: "MEDIUM | RHEL-08-010731 | PATCH | All RHEL 8 local interactive user home directory files must have mode 0750 or less permissive."
   block:
-      - name: "MEDIUM | RHEL-08-010731 | AUDIT | All RHEL 8 local interactive user home directory files must have mode 0750 or less permissive. | Find out of compliance files"
-        ansible.builtin.shell: "find {{ item }} -perm -750 ! -perm 750"
-        changed_when: false
-        failed_when: false
-        register: rhel_08_010731_files
-        with_items:
-            - "{{ rhel8stig_passwd | selectattr('uid', '>=', rhel8stig_interactive_uid_start | int) | selectattr('uid', '!=', 65534) | map(attribute='dir') | list }}"
-
       - name: "MEDIUM | RHEL-08-010731 | PATCH | All RHEL 8 local interactive user home directory files must have mode 0750 or less permissive. | Bring files into compliance"
         ansible.builtin.file:
             path: "{{ item }}"
             mode: "{{ rhel8stig_local_int_home_file_perms }}"
         with_items:
-            - "{{ rhel_08_010731_files.results | map(attribute='stdout_lines') | flatten }}"
+            - "{{ discovered_interactive_users_home.stdout_lines }}"
         when: rhel8stig_disruption_high
 
       - name: "MEDIUM | RHEL-08-010731 | AUDIT | All RHEL 8 local interactive user home directory files must have mode 0750 or less permissive. | Alert on out of compliance files"
@@ -2560,7 +2578,7 @@
             msg:
                 - "Alert! Below are the files that are in interactive user folders but permissiosn less restrictiv than 0750."
                 - "Please review the files to bring into STIG compliance"
-                - "{{ rhel_08_010731_files.results | map(attribute='stdout_lines') | flatten }}"
+                - "{{ discovered_interactive_users_home.stdout_lines }}"
         when: not rhel8stig_disruption_high
   when:
       - rhel_08_010731
@@ -2583,10 +2601,8 @@
       label: "{{ rhel8stig_passwd_label }}"
   when:
       - rhel_08_010740
-      - (item.uid >= rhel8stig_interactive_uid_start | int)
-      - (item.uid >= rhel8stig_interactive_uid_stop | int)
+      - item.uid is search(discovered_interactive_uids.stdout)
   tags:
-      - skip_ansible_lint
       - RHEL-08-010740
       - CAT2
       - CCI-000366
@@ -2606,8 +2622,7 @@
       label: "{{ rhel8stig_passwd_label }}"
   when:
       - rhel_08_010741
-      - (item.uid >= rhel8stig_interactive_uid_start | int)
-      - item.uid != 65534
+      - item.uid is search(discovered_interactive_uids.stdout)
   tags:
       - RHEL-08-010741
       - CAT2
@@ -2617,31 +2632,14 @@
       - V-244532
       - permissions
 
-- name: "MEDIUM | RHEL-08-010750 | PATCH | All RHEL 8 local interactive user home directories defined in the /etc/passwd file must exist."
-  ansible.builtin.file:
-      path: "{{ item.dir }}"
-      state: directory
-  with_items: "{{ rhel8stig_passwd }}"
-  loop_control:
-      label: "{{ rhel8stig_passwd_label }}"
-  when:
-      - rhel_08_010750
-      - (item.uid >= rhel8stig_interactive_uid_start | int)
-  tags:
-      - skip_ansible_lint
-      - RHEL-08-010750
-      - CAT2
-      - CCI-000366
-      - SRG-OS-000480-GPOS-00227
-      - SV-230323r627750_rule
-      - V-230323
-      - permissions
-
 - name: "MEDIUM | RHEL-08-010760 | PATCH | All RHEL 8 local interactive user accounts must be assigned a home directory upon creation."
   ansible.builtin.lineinfile:
       path: /etc/login.defs
       regexp: '.*?CREATE_HOME.*'
       line: CREATE_HOME     yes
+      owner: root
+      group: root
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_010760
   tags:
@@ -2747,6 +2745,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?PermitUserEnvironment'
       line: 'PermitUserEnvironment no'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_010830
@@ -3195,7 +3194,7 @@
             - password-auth
   when:
       - rhel_08_020022
-      - ansible_distribution_version is version('8.2', '>=')
+      - ansible_distribution_version is version('8.1', '<=')
   tags:
       - RHEL-08-020022
       - CAT2
@@ -3260,16 +3259,17 @@
 - name: "MEDIUM | RHEL-08-020030 | PATCH | RHEL 8 must enable a user session lock until that user re-establishes access using established identification and authentication procedures for graphical user sessions."
   block:
       - name: "MEDIUM | RHEL-08-020030 | AUDIT | RHEL 8 must enable a user session lock until that user re-establishes access using established identification and authentication procedures for graphical user sessions. | Check for lock-enabled"
-        ansible.builtin.shell: "grep lock-enabled /etc/dconf/db/* -r | cut -f1 -d:"
+        ansible.builtin.shell: "grep -IlR ^lock-enabled /etc/dconf/db/*"
         changed_when: false
         failed_when: false
         register: rhel_08_020030_lock_enabled
 
       - name: "MEDIUM | RHEL-08-020030 | PATCH | RHEL 8 must enable a user session lock until that user re-establishes access using established identification and authentication procedures for graphical user sessions. | Set if exists"
         ansible.builtin.lineinfile:
-            path: "{{ rhel_08_020030_lock_enabled.stdout }}"
-            regexp: '^lock-enabled'
+            path: "{{ item }}"
+            regexp: ^lock-enabled
             line: lock-enabled=true
+        loop: "{{ rhel_08_020030_lock_enabled.stdout_lines }}"
         when: rhel_08_020030_lock_enabled.stdout | length > 0
         notify: dconf update
 
@@ -3280,7 +3280,7 @@
             regexp: '^lock-enabled'
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
             line: |
                 [org/gnome/desktop/screensaver]
                 # Set this to true to lock the screen when the screensaver activates
@@ -3303,8 +3303,12 @@
 - name: "MEDIUM | RHEL-08-020035 | PATCH | RHEL 8 must terminate idle user sessions."
   ansible.builtin.lineinfile:
       path: "/etc/systemd/logind.conf"
-      regexp: '^StopIdleSessionSec=|^\# StopIdleSessionSec='
-      line: "StopIdleSessionSec= {{ rhel_08_020035_idlesessiontimeout }}"
+      regexp: "{{ item.regexp }}"
+      line: "{{ item.line }}"
+  loop:
+      - { regexp: '^(?#)\s*StopIdleSessionSec\s*=', line: "StopIdleSessionSec={{ rhel_08_020035_idlesessiontimeout }}" }
+      - { regexp: '^(?#)\s*KillUserProccesses\s*=', line: "KillUserProccesses=no" }
+  notify: Restart_systemdlogin
   when:
       - rhel_08_020035
   tags:
@@ -3312,7 +3316,7 @@
       - CAT2
       - CCI-001133
       - SRG-OS-000163-GPOS-00072
-      - SV-257258r917891_rule
+      - SV-257258r942953_rule
       - V-257258
       - session
 
@@ -3332,7 +3336,7 @@
             create: true
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
         loop:
             - { regexp: '^set -g lock-command', line: 'set -g lock-command vlock' }
             - { regexp: '^bind X lock-session', line: 'bind X lock-session' }
@@ -3372,13 +3376,13 @@
 - name: "MEDIUM | RHEL-08-020050 | PATCH | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed."
   block:
       - name: "MEDIUM | RHEL-08-020050 | AUDIT | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed. | Find removal-action param"
-        ansible.builtin.shell: 'grep "removal-action=" /etc/dconf/db/* -R | cut -f1 -d:'
+        ansible.builtin.shell: "grep -IlR removal-action= /etc/dconf/db/*"
         changed_when: false
         failed_when: false
         register: rhel_08_020050_removal_action
 
       - name: "MEDIUM | RHEL-08-020050 | AUDIT | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed. | Find removal-action param"
-        ansible.builtin.shell: "grep removal-action= /etc/dconf/db/* -R | cut -f1 -d: | sed 's:.*/::'"
+        ansible.builtin.shell: "grep -IlR removal-action= /etc/dconf/db/* | sed 's:.*/::'"
         changed_when: false
         failed_when: false
         register: rhel_08_020050_removal_action_file
@@ -3389,26 +3393,28 @@
             create: true
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
             line: |
                 [org/gnome/settings-daemon/peripherals/smartcard]
                 removal-action='lock-screen'
-        when: rhel_08_020050_removal_action.stdout | length == 0
+        when: rhel_08_020050_removal_action.stdout_lines | length == 0
         notify: dconf update
 
       - name: "MEDIUM | RHEL-08-020050 | PATCH | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed. | Update removal-action if exists"
         ansible.builtin.lineinfile:
-            path: "{{ rhel_08_020050_removal_action.stdout }}"
+            path: "{{ item }}"
             regexp: ^removal-action=
             line: removal-action='lock-screen'
-        when: rhel_08_020050_removal_action.stdout | length > 0
+        loop: "{{ rhel_08_020050_removal_action.stdout_lines }}"
+        when: rhel_08_020050_removal_action.stdout_lines | length > 0
         notify: dconf update
 
       - name: "MEDIUM | RHEL-08-020050 | PATCH | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed. | Set smartcard section of db"
         ansible.builtin.lineinfile:
-            path: '/etc/dconf/db/distro.d/locks/{{ rhel_08_020050_removal_action_file.stdout }}'
+            path: '/etc/dconf/db/distro.d/locks/{{ item }}'
             line: /org/gnome/settings-daemon/peripherals/smartcard/removal-action
-        when: rhel_08_020050_removal_action_file.stdout | length > 0
+        loop: "{{ rhel_08_020050_removal_action_file.stdout_lines }}"
+        when: rhel_08_020050_removal_action_file.stdout_lines | length > 0
         notify: dconf update
 
       - name: "MEDIUM | RHEL-08-020050 | PATCH | RHEL 8 must be able to initiate directly a session lock for all connection types using smartcard when the smartcard is removed. | Set smartcard section of db"
@@ -3418,8 +3424,8 @@
             line: /org/gnome/settings-daemon/peripherals/smartcard/removal-action
             owner: root
             group: root
-            mode: 0640
-        when: rhel_08_020050_removal_action_file.stdout | length == 0
+            mode: '0640'
+        when: rhel_08_020050_removal_action_file.stdout_lines | length == 0
         notify: dconf update
   when:
       - rhel_08_020050
@@ -3436,7 +3442,7 @@
 - name: "MEDIUM | RHEL-08-020060 | PATCH | RHEL 8 must automatically log out graphical user sessions after 15 minutes of inactivity."
   block:
       - name: "MEDIUM | RHEL-08-020060 | AUDIT | RHEL 8 must automatically log out graphical user sessions after 15 minutes of inactivity. | Find idle-delay parameter"
-        ansible.builtin.shell: 'grep idle-delay= /etc/dconf/db/* -R | cut -f1 -d:'
+        ansible.builtin.shell: 'grep -IlR idle-delay= /etc/dconf/db/*'
         changed_when: false
         failed_when: false
         register: rhel_08_020060_idle_delay_param
@@ -3447,25 +3453,26 @@
             create: true
             owner: root
             group: root
-            mode: 0640
+            mode: '0640'
             regexp: '^idle-delay'
             line: |
                 [org/gnome/desktop/session]
                 # Set the lock time out to 900 seconds before the session is considered idle
                 idle-delay=uint32 900
         notify: dconf update
-        when: rhel_08_020060_idle_delay_param.stdout | length == 0
+        when: rhel_08_020060_idle_delay_param.stdout_lines | length == 0
 
       - name: "MEDIUM | RHEL-08-020060 | PATCH | RHEL 8 must automatically log out graphical user sessions after 15 minutes of inactivity. | Set idle-delay if exists"
         ansible.builtin.lineinfile:
-            path: "{{ rhel_08_020060_idle_delay_param.stdout }}"
+            path: "{{ item }}"
             regexp: '^idle-delay='
             line: idle-delay=uint32 900
             owner: root
             group: root
-            mode: 0640
+            mode: '0640'
+        loop: "{{ rhel_08_020060_idle_delay_param.stdout_lines }}"
+        when: rhel_08_020060_idle_delay_param.stdout_lines | length > 0
         notify: dconf update
-        when: rhel_08_020060_idle_delay_param.stdout | length > 0
   when:
       - rhel_08_020060
       - "'dconf' in ansible_facts.packages"
@@ -3494,7 +3501,7 @@
             line: "set -g lock-after-time {{ rhel8stig_tmux_lock_after_time }}"
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
   when:
       - rhel_08_020070
   tags:
@@ -3513,7 +3520,7 @@
       line: /org/gnome/desktop/screensaver/lock-delay
       owner: root
       group: root
-      mode: 0640
+      mode: '0640'
   when:
       - rhel_08_020080
       - "'dconf' in ansible_facts.packages"
@@ -3534,7 +3541,7 @@
       line: "{{ item.line }}"
       owner: root
       group: root
-      mode: 0600
+      mode: '0600'
   with_items:
       - { regexp: '^\[{{ rhel8stig_sssd.certmap }}\]', line: '[{{ rhel8stig_sssd.certmap }}]' }
       - { regexp: '^matchrule {{ rhel8stig_sssd.matchrule }}', line: 'matchrule {{ rhel8stig_sssd.matchrule }}' }
@@ -3561,7 +3568,7 @@
       insertafter: '^password'
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pamd_file_perms }}"
   when:
       - rhel_08_020100
   tags:
@@ -3581,7 +3588,7 @@
       insertafter: '^password'
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pamd_file_perms }}"
   when:
       - rhel_08_020101
   tags:
@@ -3609,7 +3616,7 @@
             insertafter: '^password'
             owner: root
             group: root
-            mode: 0644
+            mode: "{{ rhel8stig_pamd_file_perms }}"
         when: rhel_08_020102_pwquality_status.stdout | length == 0
 
       - name: "MEDIUM | RHEL-08-020102 | PATCH | RHEL 8 systems below version 8.4 must ensure the password complexity module in the system-auth file is configured for three retries or less. | Replace if already exists"
@@ -3649,7 +3656,7 @@
             insertafter: '^password'
             owner: root
             group: root
-            mode: 0644
+            mode: "{{ rhel8stig_pamd_file_perms }}"
         when: rhel_08_020103_pwquality_status.stdout | length == 0
 
       - name: "MEDIUM | RHEL-08-020103 | PATCH | RHEL 8 systems below version 8.4 must ensure the password complexity module in the password-auth file is configured for three retries or less. | Replace if already exists"
@@ -3678,6 +3685,7 @@
       path: /etc/security/pwquality.conf
       regexp: '^retry =|^#.*retry ='
       line: retry = {{ rhel8stig_pam_pwquality_retry }}
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020104
       - ansible_distribution_version is version('8.4', '>=')
@@ -3697,7 +3705,7 @@
       line: "ucredit = {{ rhel8stig_password_complexity.ucredit | default('-1') }}"
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
       create: true
   when:
       - rhel_08_020110
@@ -3718,7 +3726,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020120
   tags:
@@ -3738,7 +3746,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020130
   tags:
@@ -3758,7 +3766,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020140
   tags:
@@ -3778,7 +3786,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020150
   tags:
@@ -3798,7 +3806,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020160
   tags:
@@ -3818,7 +3826,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020170
   tags:
@@ -3860,7 +3868,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_020190
   tags:
@@ -3876,11 +3884,11 @@
   ansible.builtin.lineinfile:
       path: /etc/login.defs
       create: true
-      owner: root
-      group: root
-      mode: 0644
       regexp: ^#?PASS_MAX_DAYS
       line: "PASS_MAX_DAYS {{ rhel8stig_login_defaults.pass_max_days | default('60') }}"
+      owner: root
+      group: root
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_020200
   tags:
@@ -3938,7 +3946,7 @@
             insertafter: '^password'
             owner: root
             group: root
-            mode: 0644
+            mode: "{{ rhel8stig_pamd_file_perms }}"
         when: rhel_08_020220_pwhistory_status.stdout | length == 0
 
       - name: "MEDIUM | RHEL-08-020220 | RHEL 8 must be configured in the password-auth file to prohibit password reuse for a minimum of five generations. | Set if pw required pwhistory exists"
@@ -3977,7 +3985,7 @@
             insertafter: '^password'
             owner: root
             group: root
-            mode: 0644
+            mode: "{{ rhel8stig_pamd_file_perms }}"
         when: rhel_08_020221_pwhistory_status.stdout | length == 0
 
       - name: "MEDIUM | RHEL-08-020221 | PATCH | RHEL 8 must be configured in the system-auth file to prohibit password reuse for a minimum of five generations. | Set if pw required pwhistory exists"
@@ -4008,7 +4016,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020230
   tags:
@@ -4027,7 +4035,7 @@
       line: "PASS_MIN_LEN 15"
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_020231
   tags:
@@ -4085,7 +4093,7 @@
             insertafter: "{{ item.insertafter }}"
             owner: root
             group: root
-            mode: 0600
+            mode: '0600'
         notify: restart sssd
         with_items:
             - { regexp: '^\[pam\]', insertafter: 'EOF', line: '[pam]' }
@@ -4097,7 +4105,7 @@
             line: auth       sufficient pam_sss.so try_cert_auth
             owner: root
             group: root
-            mode: 0644
+            mode: '0644'
         notify: restart sssd
         when: rhel_08_020250_sc_auth_sss.stdout | length == 0
 
@@ -4144,7 +4152,7 @@
       - CAT2
       - CCI-000765
       - SRG-OS-000105-GPOS-00052
-      - SV-230372r627750_rule
+      - SV-230372r942945_rule
       - V-230372
       - pamd
 
@@ -4193,7 +4201,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020280
   tags:
@@ -4213,7 +4221,7 @@
       insertafter: "{{ item.insertafter }}"
       owner: root
       group: root
-      mode: 0600
+      mode: '0600'
   with_items:
       - { regexp: '^\[pam\]', insertafter: 'EOF', line: '[pam]' }
       - { regexp: '^offline_credentials_expiration =', insertafter: '\[pam\]', line: 'offline_credentials_expiration = 1' }
@@ -4225,7 +4233,7 @@
       - CAT2
       - CCI-002007
       - SRG-OS-000383-GPOS-00166
-      - SV-230376r627750_rule
+      - SV-230376r942948_rule
       - V-230376
       - sssd
 
@@ -4237,7 +4245,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_pwquality_file_perms }}"
   when:
       - rhel_08_020300
   tags:
@@ -4256,7 +4264,7 @@
       line: "FAIL_DELAY {{ rhel8stig_login_defaults.fail_delay_secs | default('4') }}"
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_020310
   tags:
@@ -4328,7 +4336,7 @@
       line: "UMASK           {{ rhel8stig_login_defaults.umask | default('077') }}"
       owner: root
       group: root
-      mode: 0644
+      mode: "{{ rhel8stig_login_defs_file_perms }}"
   when:
       - rhel_08_020351
   tags:
@@ -4352,7 +4360,7 @@
             hidden: true
             use_regex: true
         register: rhel8stig_020352_file
-        loop: "{{ local_home_directories.stdout_lines }}"
+        loop: "{{ discovered_interactive_users_home.stdout_lines }}"
 
       - name: "MEDIUM | RHEL-08-020352 | PATCH | RHEL 8 must set the umask value to 077 for all local interactive user accounts. | Remove umask param"
         ansible.builtin.lineinfile:
@@ -4544,7 +4552,7 @@
         ansible.builtin.file:
             path: "{{ rhel08_030070_auditlog_location.stdout }}"
             state: "{{ (rhel08_030070_auditlog.stat.exists) | ternary('file', 'touch') }}"
-            mode: '0600'
+            mode: o-x,go-rwx
   when:
       - rhel_08_030070
   tags:
@@ -4672,7 +4680,7 @@
       - name: "MEDIUM | RHEL-08-030120 | PATCH | RHEL 8 audit log directories must have a mode of 0700 or less permissive to prevent unauthorized read access. | Set audit log dir perms"
         ansible.builtin.file:
             path: "{{ rhel_08_030120_audit_log_dir.stdout }}"
-            mode: 0700
+            mode: go-rwx
             state: directory
         when: rhel_08_030120_audit_log_dir.stdout | length > 0
   when:
@@ -5458,7 +5466,7 @@
 - name: "MEDIUM | RHEL-08-030610 | PATCH | RHEL 8 must allow only the Information System Security Manager (ISSM) (or individuals or roles appointed by the ISSM) to select which auditable events are to be audited."
   ansible.builtin.file:
       path: "{{ item }}"
-      mode: 0640
+      mode: '0640'
   with_items:
       - /etc/audit/rules.d/audit.rules
       - /etc/audit/auditd.conf
@@ -5485,7 +5493,7 @@
       - name: "MEDIUM | RHEL-08-030620 | PATCH | RHEL 8 audit tools must have a mode of 0755 or less permissive. | Set permissions to 755 on tools"
         ansible.builtin.file:
             path: "{{ item }}"
-            mode: 0755
+            mode: go-w
         with_items:
             - "{{ rhel_08_030620_tools.stdout_lines }}"
   when:
@@ -5556,7 +5564,7 @@
       line: "{{ item }}"
       owner: root
       group: root
-      mode: 0600
+      mode: '0600'
   with_items:
       - "# Audit Tools"
       - /usr/sbin/auditctl p+i+n+u+g+s+b+acl+xattrs+sha512
@@ -5681,7 +5689,7 @@
       create: true
       owner: root
       group: root
-      mode: 0644
+      mode: '0644'
       regexp: "{{ item.regexp }}"
       line: "{{ item.line }}"
   with_items:
@@ -5808,12 +5816,12 @@
       line: "{{ item.line }}"
       owner: root
       group: root
-      mode: 0640
+      mode: "{{ rhel8stig_blacklist_conf_file_perms }}"
       insertafter: "{{ item.insertafter }}"
   notify: change_requires_reboot
   with_items:
       - { regexp: '##Disable WebCam', line: '##Disable WebCam', insertafter: 'EOF' }
-      - { regexp: '^install uvcvideo', line: 'install uvcvideo /bin/true', insertafter: '##Disable WebCam' }
+      - { regexp: '^install uvcvideo', line: 'install uvcvideo /bin/false', insertafter: '##Disable WebCam' }
       - { regexp: '^blacklist uvcvideo', line: 'blacklist uvcvideo', insertafter: '##Disable WebCam' }
   when:
       - rhel_08_040020
@@ -5822,7 +5830,7 @@
       - CAT2
       - CCI-000381
       - SRG-OS-000095-GPOS-00049
-      - SV-230493r809316_rule
+      - SV-230493r942915_rule
       - V-230493
       - camera
 
@@ -5956,9 +5964,9 @@
       create: true
       owner: root
       group: root
-      mode: 0640
+      mode: "{{ rhel8stig_blacklist_conf_file_perms }}"
   with_items:
-      - { regexp: '^install usb-storage', line: 'install usb-storage /bin/true', insertafter: 'EOF' }
+      - { regexp: '^install usb-storage', line: 'install usb-storage /bin/false', insertafter: 'EOF' }
       - { regexp: '^blacklist usb-storage', line: 'blacklist usb-storage', insertafter: '#blacklist usb-storage'}
   when:
       - rhel_08_040080
@@ -5967,7 +5975,7 @@
       - CAT2
       - CCI-000778
       - SRG-OS-000114-GPOS-00059
-      - SV-230503r809319_rule
+      - SV-230503r942936_rule
       - V-230503
       - usb_devices
 
@@ -6037,15 +6045,38 @@
             permanent: true
             state: present
 
+      - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Copy existing rules to new zone"
+        ansible.builtin.copy:
+            src: "/etc/firewalld/zones/{{ rhel8stig_existing_zone_to_copy }}.xml"
+            dest: "/etc/firewalld/zones/{{ rhel8stig_custom_firewall_zone }}.xml"
+            remote_src: true
+        when:
+            - rhel8stig_copy_existing_zone
+            - rhel8stig_existing_zone_to_copy | length > 0
+
+      - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Amend copied file"
+        ansible.builtin.replace:
+            path: "/etc/firewalld/zones/{{ rhel8stig_custom_firewall_zone }}.xml"
+            regexp: "{{ item.regexp }}"
+            replace: \1{{ item.replace }}\2
+        loop:
+            - { regexp: (\s*<zone)>(\s*$), replace: ' target="DROP">' }
+            - { regexp: (\s*<short>).*(<\/short>), replace: "{{ rhel8stig_custom_firewall_zone }}" }
+        when:
+            - rhel8stig_copy_existing_zone
+            - rhel8stig_existing_zone_to_copy | length > 0
+
       - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Allow internet and ssh"
         ansible.posix.firewalld:
             zone: "{{ rhel8stig_custom_firewall_zone }}"
             permanent: true
             state: enabled
-            service: "{{ (item == (item | regex_search('^[a-z]+$')))        | bool | ternary(item, omit) }}"
-            port: "{{ (item == (item | regex_search('^[0-9]+/[a-z]+$'))) | bool | ternary(item, omit) }}"
+            service: "{{ (item == (item | regex_search('^[a-z]+$'))) | ternary(item, omit) }}"
+            port: "{{ (item == (item | regex_search('^[0-9]+/[a-z]+$'))) | ternary(item, omit) }}"
         with_items:
             - "{{ rhel8stig_white_list_services }}"
+        when:
+            - not rhel8stig_copy_existing_zone
 
       - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Target Drop | 2.10+"
         ansible.posix.firewalld:
@@ -6053,7 +6084,9 @@
             permanent: true
             state: enabled
             target: DROP
-        when: ansible_version.full is version_compare('2.10.0 | int', '>=')
+        when:
+            - ansible_version.full is version_compare('2.10.0 | int', '>=')
+            - not rhel8stig_copy_existing_zone
 
       - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Target Drop | 2.9"
         block:
@@ -6067,7 +6100,9 @@
               ansible.builtin.shell: firewall-cmd --permanent --zone={{ rhel8stig_custom_firewall_zone }} --set-target=DROP
               when:
                   - rhel8stig_target_drop_set.rc != 0
-        when: ansible_version.full is version_compare('2.10 | int', '<')
+        when:
+            - ansible_version.full is version_compare('2.10 | int', '<')
+            - not rhel8stig_copy_existing_zone
 
       - name: "MEDIUM | RHEL-08-040090 | PATCH | A RHEL 8 firewall must employ a deny-all, allow-by-exception policy for allowing connections to other systems. | Reload zones"
         ansible.builtin.shell: firewall-cmd --reload
@@ -6088,7 +6123,7 @@
       - CAT2
       - CCI-002314
       - SRG-OS-000297-GPOS-00115
-      - SV-230504r809321_rule
+      - SV-230504r942942_rule
       - V-230504
       - firewall
 
@@ -6119,7 +6154,7 @@
       - CCI-001444
       - SRG-OS-000299-GPOS-00117
       - SV-230506r627750_rule
-      - V-23050
+      - V-230506
       - wifi
 
 - name: "MEDIUM | RHEL-08-040111 | PATCH | RHEL 8 Bluetooth must be disabled."
@@ -6128,11 +6163,11 @@
         ansible.builtin.lineinfile:
             path: /etc/modprobe.d/bluetooth.conf
             regexp: '^install bluetooth '
-            line: "install bluetooth /bin/true"
+            line: "install bluetooth /bin/false"
             create: true
             owner: root
             group: root
-            mode: 0640
+            mode: '0640'
         notify: change_requires_reboot
 
       - name: "MEDIUM | RHEL-08-040111 | PATCH | RHEL 8 Bluetooth must be disabled. | Disable Bluetooth kernel module"
@@ -6143,7 +6178,7 @@
             line: "{{ item.line }}"
             owner: root
             group: root
-            mode: 0640
+            mode: "{{ rhel8stig_blacklist_conf_file_perms }}"
             insertafter: "{{ item.insertafter }}"
         notify: change_requires_reboot
         with_items:
@@ -6155,7 +6190,7 @@
       - CAT2
       - CCI-001443
       - SRG-OS-000300-GPOS-00118
-      - SV-230507r833336_rule
+      - SV-230507r942939_rule
       - V-230507
       - bluetooth
 
@@ -6581,6 +6616,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?RekeyLimit'
       line: 'RekeyLimit 1G 1h'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_040161
@@ -6627,7 +6663,9 @@
             regexp: net.ipv4.conf.default.accept_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040209_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040209_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040209_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040209 | PATCH | RHEL 8 must prevent IPv4 Internet Control Message Protocol (ICMP) redirect messages from being accepted. | Use template to create file"
         ansible.posix.sysctl:
@@ -6662,7 +6700,9 @@
             regexp: net.ipv6.conf.default.accept_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040210_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040210_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040210_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040210 | PATCH | RHEL 8 must prevent IPv6 Internet Control Message Protocol (ICMP) redirect messages from being accepted. | Use template to create file"
         ansible.posix.sysctl:
@@ -6699,7 +6739,9 @@
             regexp: net.ipv4.conf.all.send_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040220_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040220_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040220_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040220 | PATCH | RHEL 8 must not send Internet Control Message Protocol (ICMP) redirects. | Use template to create file"
         ansible.posix.sysctl:
@@ -6723,7 +6765,7 @@
 - name: "MEDIUM | RHEL-08-040230 | PATCH | The RHEL 8 must not respond to Internet Control Message Protocol (ICMP) echoes sent to a broadcast address."
   block:
       - name: "MEDIUM | RHEL-08-040230 | AUDIT | The RHEL 8 must not respond to Internet Control Message Protocol (ICMP) echoes sent to a broadcast address. | Find conflicting instances"
-        ansible.builtin.shell: grep -rs "net.ipv4.icmp_echo_ignore_broadcasts = [^1]" /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf /etc/sysctl.conf /etc/sysctl.d/*.conf | cut -d':' -f1
+        ansible.builtin.shell: grep -rs "net.ipv4.icmp_echo_ignore_broadcasts\s*=\s*0" /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf /etc/sysctl.conf /etc/sysctl.d/*.conf | cut -d':' -f1
         changed_when: false
         failed_when: false
         register: rhel_08_040230_conflicting_settings
@@ -6731,19 +6773,22 @@
       - name: "MEDIUM | RHEL-08-040230 | PATCH | The RHEL 8 must not respond to Internet Control Message Protocol (ICMP) echoes sent to a broadcast address. | Replace conflicting instances"
         ansible.builtin.lineinfile:
             path: "{{ item }}"
-            regexp: net.ipv4.icmp_echo_ignore_broadcasts = [^1]
+            regexp: ^net.ipv4.icmp_echo_ignore_broadcasts.*
             state: absent
         loop: "{{ rhel_08_040230_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040230_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040230_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040230 | PATCH | The RHEL 8 must not respond to Internet Control Message Protocol (ICMP) echoes sent to a broadcast address. | Use template to create file"
         ansible.posix.sysctl:
             name: net.ipv4.icmp_echo_ignore_broadcasts
-            value: 0
+            value: 1
             state: present
             reload: "{{ rhel8stig_sysctl_reload }}"
             sysctl_set: true
             sysctl_file: "{{ rhel8stig_sysctl_file }}"
+
   when:
       - rhel_08_040230
   tags:
@@ -6769,7 +6814,9 @@
             regexp: net.ipv4.conf.all.accept_source_route = [^0]
             state: absent
         loop: "{{ rhel_08_040239_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040239_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040239_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040239 | PATCH | RHEL 8 must not forward IPv4 source-routed packets. | Use template to create file"
         ansible.posix.sysctl:
@@ -6840,7 +6887,9 @@
             regexp: net.ipv4.conf.default.accept_source_route = [^0]
             state: absent
         loop: "{{ rhel_08_040249_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040249_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040249_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040249 | PATCH | RHEL 8 must not forward IPv4 source-routed packets by default. | Use template to create file"
         ansible.posix.sysctl:
@@ -6911,7 +6960,9 @@
             regexp: net.ipv4.conf.all.forwarding = [^0]
             state: absent
         loop: "{{ rhel_08_040259_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040259_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040259_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040259 | PATCH | RHEL 8 must not enable IPv4 packet forwarding unless the system is a router. | Use template to create file"
         ansible.posix.sysctl:
@@ -6947,7 +6998,9 @@
             regexp: net.ipv6.conf.all.forwarding = [^0]
             state: absent
         loop: "{{ rhel_08_040260_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040260_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040260_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040260 | PATCH | RHEL 8 must not enable IPv6 packet forwarding unless the system is a router. | Use template to create file"
         ansible.posix.sysctl:
@@ -6959,6 +7012,7 @@
             sysctl_file: "{{ rhel8stig_sysctl_file }}"
   when:
       - rhel_08_040260
+      - rhel8stig_ipv6_required
       - not rhel8stig_system_is_router
   tags:
       - RHEL-08-040260
@@ -6983,7 +7037,9 @@
             regexp: net.ipv6.conf.all.accept_ra = [^0]
             state: absent
         loop: "{{ rhel_08_040261_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040261_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040261_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040261 | PATCH | RHEL 8 must not accept router advertisements on all IPv6 interfaces. | Use template to create file"
         ansible.posix.sysctl:
@@ -7020,7 +7076,9 @@
             regexp: net.ipv6.conf.default.accept_ra = [^0]
             state: absent
         loop: "{{ rhel_08_040262_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040262_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040262_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040262 | PATCH | RHEL 8 must not accept router advertisements on all IPv6 interfaces by default. | Use template to create file"
         ansible.posix.sysctl:
@@ -7057,7 +7115,9 @@
             regexp: net.ipv4.conf.default.send_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040270_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040270_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040270_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040270 | PATCH | The RHEL 8 must not allow interfaces to perform Internet Control Message Protocol (ICMP) redirects by default. | Use template to create file"
         ansible.posix.sysctl:
@@ -7092,11 +7152,13 @@
             regexp: net.ipv4.conf.all.accept_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040279_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040279_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040279_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040279 | PATCH | RHEL 8 must ignore IPv4 Internet Control Message Protocol (ICMP) redirect messages. | Use template to create file"
         ansible.posix.sysctl:
-            name: net.ipv4.conf.all.send_redirects
+            name: net.ipv4.conf.all.accept_redirects
             value: 0
             state: present
             reload: "{{ rhel8stig_sysctl_reload }}"
@@ -7127,7 +7189,9 @@
             regexp: net.ipv6.conf.all.accept_redirects = [^0]
             state: absent
         loop: "{{ rhel_08_040280_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040280_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040280_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040280 | PATCH | RHEL 8 must ignore IPv6 Internet Control Message Protocol (ICMP) redirect messages. | Use template to create file"
         ansible.posix.sysctl:
@@ -7163,7 +7227,9 @@
             regexp: kernel.unprivileged_bpf_disabled = [^1]
             state: absent
         loop: "{{ rhel_08_040281_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040281_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040281_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040281 | PATCH | RHEL 8 must disable access to network bpf syscall from unprivileged processes. | Use template to create file"
         ansible.posix.sysctl:
@@ -7187,7 +7253,7 @@
 - name: "MEDIUM | RHEL-08-040282 | PATCH | RHEL 8 must restrict usage of ptrace to descendant processes."
   block:
       - name: "MEDIUM | RHEL-08-040282 | AUDIT | RHEL 8 must restrict usage of ptrace to descendant processes. | Find conflicting instances"
-        ansible.builtin.shell: grep -rs "kernel.yama.ptrace_scope = [^1]" /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf /etc/sysctl.conf /etc/sysctl.d/*.conf | cut -d':' -f1
+        ansible.builtin.shell: grep -rs "kernel.yama.ptrace_scope\s*=\s*1" /run/sysctl.d/*.conf /usr/local/lib/sysctl.d/*.conf /usr/lib/sysctl.d/*.conf /lib/sysctl.d/*.conf /etc/sysctl.conf /etc/sysctl.d/*.conf | cut -d':' -f1
         changed_when: false
         failed_when: false
         register: rhel_08_040282_conflicting_settings
@@ -7195,10 +7261,12 @@
       - name: "MEDIUM | RHEL-08-040282 | PATCH | RHEL 8 must restrict usage of ptrace to descendant processes. | Replace conflicting instances"
         ansible.builtin.lineinfile:
             path: "{{ item }}"
-            regexp: kernel.yama.ptrace_scope = [^1]
+            regexp: kernel.yama.ptrace_scope.*
             state: absent
         loop: "{{ rhel_08_040282_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040282_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040282_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040282 | PATCH | RHEL 8 must restrict usage of ptrace to descendant processes. | Use template to create file"
         ansible.posix.sysctl:
@@ -7233,7 +7301,9 @@
             regexp: kernel.kptr_restrict = [^1]
             state: absent
         loop: "{{ rhel_08_040283_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040283_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040283_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040283 | PATCH | RHEL 8 must restrict exposed kernel pointer addresses access. | Use template to create file"
         ansible.posix.sysctl:
@@ -7268,7 +7338,9 @@
             regexp: user.max_user_namespaces = [^0]
             state: absent
         loop: "{{ rhel_08_040284_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040284_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040284_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040284 | PATCH | RHEL 8 must disable the use of user namespaces. | Use template to create file"
         ansible.posix.sysctl:
@@ -7303,7 +7375,9 @@
             regexp: net.ipv4.conf.all.rp_filter = [^1]
             state: absent
         loop: "{{ rhel_08_040285_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040285_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040285_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040285 | PATCH | RHEL 8 must use reverse path filtering on all IPv4 interfaces. | Use template to create file"
         ansible.posix.sysctl:
@@ -7338,7 +7412,9 @@
             regexp: net.core.bpf_jit_harden = [^2]
             state: absent
         loop: "{{ rhel_08_040286_conflicting_settings.stdout_lines }}"
-        when: rhel_08_040286_conflicting_settings.stdout | length > 0
+        when:
+            - rhel_08_040286_conflicting_settings.stdout | length > 0
+            - item != rhel8stig_sysctl_file
 
       - name: "MEDIUM | RHEL-08-040286 | PATCH | RHEL 8 must enable hardening for the Berkeley Packet Filter Just-in-time compiler. | Use template to create file"
         ansible.posix.sysctl:
@@ -7401,6 +7477,7 @@
       state: link
   when:
       - rhel_08_040321
+      - not rhel8stig_gui
   tags:
       - RHEL-08-040321
       - CAT2
@@ -7440,6 +7517,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?X11Forwarding'
       line: 'X11Forwarding no'
+      validate: '/usr/sbin/sshd -T -f %s'
   notify: restart sshd
   when:
       - rhel_08_040340
@@ -7458,6 +7536,7 @@
       path: /etc/ssh/sshd_config
       regexp: '(?i)^#?X11UseLocalhost'
       line: 'X11UseLocalhost yes'
+      validate: '/usr/sbin/sshd -T -f %s'
   when:
       - rhel_08_040341
       - rhel8stig_ssh_required
@@ -7472,11 +7551,12 @@
 - name: "MEDIUM | RHEL-08-040342 | PATCH | RHEL 8 SSH server must be configured to use only FIPS-validated key exchange algorithms. | Add KEXs"
   block:
       - name: "MEDIUM | RHEL-08-040342 | AUDIT | RHEL 8 SSH server must be configured to use only FIPS-validated key exchange algorithms. | get KEXs"
-        ansible.builtin.shell: grep "^CRYPTO_POLICY" /etc/crypto-policies/back-ends/opensshserver.config | cut -d "'" -f2 | sed s'/ /\n/g' | grep -i okexa | sed s'/-o//g'
+        ansible.builtin.shell: grep -E "^CRYPTO_POLICY" /etc/crypto-policies/back-ends/opensshserver.config | cut -d "'" -f2 | sed s'/ /\n/g' | grep -i okexa | sed s'/-o//g'
         changed_when: false
+        failed_when: false
         register: rhel8stig_current_kex
 
-      - name: MEDIUM | RHEL-08-040342 | PATCH | RHEL 8 SSH server must be configured to use only FIPS-validated key exchange algorithms. | get KEXs"
+      - name: MEDIUM | RHEL-08-040342 | PATCH | RHEL 8 SSH server must be configured to use only FIPS-validated key exchange algorithms. | update KEXs"
         ansible.builtin.lineinfile:
             path: /etc/crypto-policies/back-ends/opensshserver.config
             regexp: '(^CRYPTO_POLICY=.*)-o{{ rhel8stig_current_kex.stdout }}(.*$)'
@@ -7585,7 +7665,7 @@
       - CAT2
       - CCI-002265
       - SRG-OS-000324-GPOS-00125
-      - SV-254520r858835_rule
+      - SV-254520r928805_rule
       - V-254520
       - selinux
 

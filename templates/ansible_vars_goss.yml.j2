@@ -1,8 +1,8 @@
 
 ## metadata for Audit benchmark
-benchmark_version: '1.11'
+benchmark_version: {{ benchmark_version }}
 
-rhel8stig_os_distribution: {{ ansible_distribution | lower }}
+rhel8stig_os_distribution: {{ ansible_facts['distribution'] | lower }}
 
 gpg_keys:
 {% for info in gpg_keys %}
@@ -11,8 +11,9 @@ gpg_keys:
 {% endfor %}
 rpm_gpg_key: {{ rpm_gpg_key }}
 
-rhel8stig_os_version_pre_8_2: {% if ansible_distribution_version >= '8.2' %}false{% else %}true{% endif %}
+rhel8stig_os_version_pre_8_2: {% if ansible_facts['distribution_version'] is version('8.1', '<=') %}true{% else %}false{% endif %}
 
+OS_ver: {{ ansible_facts['distribution_version'] }}
 
 # Some tests may need to scan every filesystem or have an impact on a system
 # these may need be scheduled to minimise impact also ability to set a timeout if taking too long
@@ -225,7 +226,7 @@ RHEL_08_020100: {{ rhel_08_020100 }}
 RHEL_08_020101: {{ rhel_08_020101 }}
 RHEL_08_020102: {{ rhel_08_020102 }}
 RHEL_08_020103: {{ rhel_08_020103 }}
-RHEL_08_020104: {{ rhel_08_020104 }}
+RHEL_08_020104: {% if ansible_facts['distribution_version'] is version('8.4', '>=') %}true{% else %}false{% endif %}  # Only runs if 8.4 or greater
 RHEL_08_020110: {{ rhel_08_020110 }}
 RHEL_08_020120: {{ rhel_08_020120 }}
 RHEL_08_020130: {{ rhel_08_020130 }}
@@ -407,7 +408,7 @@ RHEL_08_010292: {{ rhel_08_010292 }}
 RHEL_08_010375: {{ rhel_08_010375 }}
 RHEL_08_010376: {{ rhel_08_010376 }}
 RHEL_08_010440: {{ rhel_08_010440 }}
-RHEL_08_010471: {{ rhel_08_010471 }}
+RHEL_08_010471: {% if ansible_facts['distribution_version'] is version('8.4', '>=') %}false{% else %}true{% endif %}  # Only runs if 8.3 or less
 RHEL_08_010540: {{ rhel_08_010540 }}
 RHEL_08_010541: {{ rhel_08_010541 }}
 RHEL_08_010542: {{ rhel_08_010542 }}
@@ -443,13 +444,13 @@ MAX_UID: {{ rhel8stig_interactive_uid_stop }}
 # RHEL_08_010040-010050-010060
 rhel8stig_banner_file: /etc/issue
 rhel8stig_logon_banner:
-- You are accessing a U.S. Government (USG) Information System (IS) that is provided for USG-authorized use only.
-- By using this IS (which includes any device attached to this IS), you consent to the following conditions
-- -The USG routinely intercepts and monitors communications on this IS for purposes including, but not limited to, penetration testing, COMSEC monitoring, network operations and defense, personnel misconduct (PM), law enforcement (LE), and counterintelligence (CI) investigations.
-- -At any time, the USG may inspect and seize data stored on this IS.
-- -Communications using, or data stored on, this IS are not private, are subject to routine monitoring, interception, and search, and may be disclosed or used for any USG-authorized purpose.
-- -This IS includes security measures (e.g., authentication and access controls) to protect USG interests--not for your personal benefit or privacy.
-- -Notwithstanding the above, using this IS does not constitute consent to PM, LE or CI investigative searching or monitoring of the content of privileged communications, or work product, related to personal representation or services by attorneys, psychotherapists, or clergy, and their assistants. Such communications and work product are private and confidential. See User Agreement for details.
+  You are accessing a U.S. Government (USG) Information System (IS) that is provided for USG-authorized use only.
+  By using this IS (which includes any device attached to this IS), you consent to the following conditions
+  -The USG routinely intercepts and monitors communications on this IS for purposes including, but not limited to, penetration testing, COMSEC monitoring, network operations and defense, personnel misconduct (PM), law enforcement (LE), and counterintelligence (CI) investigations.
+  -At any time, the USG may inspect and seize data stored on this IS.
+  -Communications using, or data stored on, this IS are not private, are subject to routine monitoring, interception, and search, and may be disclosed or used for any USG-authorized purpose.
+  -This IS includes security measures (e.g., authentication and access controls) to protect USG interests--not for your personal benefit or privacy.
+  -Notwithstanding the above, using this IS does not constitute consent to PM, LE or CI investigative searching or monitoring of the content of privileged communications, or work product, related to personal representation or services by attorneys, psychotherapists, or clergy, and their assistants. Such communications and work product are private and confidential. See User Agreement for details.
 
 # RHEL_08_010680 to change if using hostfile only - seperate checks
 rhel8stig_uses_dns: true
@@ -479,6 +480,3 @@ rhel8stig_remotelog_protocol: '{{ rhel8stig_remotelog_server.protocol }}'
 
 # RHEL_08_040137
 python_bin: {{ ansible_python.executable }}
-
-# RHEL_08_040260-62
-rhel8stig_system_is_router: {{ rhel8stig_system_is_router }}

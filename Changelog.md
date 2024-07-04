@@ -1,7 +1,54 @@
 # Changes to RHEL8STIG
 
+## 3.2 - STIV V1R13 - 24th Jan 2024
+
+- Audit updated
+  - moved audit into prelim
+  - updates to audit logic for copy and archive options
+
+ruleid updated
+
+- 010001
+- 020250
+- 020290
+- 040090
+
+CAT II
+
+- 020035 - updated rule and added handler for logind restart
+- 040020 - /bin/false update and ruleid update
+- 040080 - /bin/false and ruleid
+- 040111 - /bin/false and ruleid
+
+CAT III
+
+- 040021 - /bin/false and ruleid
+- 040022 - /bin/false and ruleid
+- 040023 - /bin/false and ruleid
+- 040024 - /bin/false and ruleid
+- 040025 - /bin/false and ruleid
+- 040026 - /bin/false and ruleid
+
+## 3.1 - STIG V1R12 - 25th Oct 2023
+
+ruleid updated
+
+- 010020
+- 010471
+- 030741
+- 030742
+- 040400
+
+- added SSH validation
+- added ansible_facts for variable usage
+
+- AUDIT
+  - Audit_only ability now added to run standalone audit
+    - audit_only: true
+  - Related Audit repo updated to improve tests audit binary(goss updated to latest version)
+
 ## 3.0.3 - Stig V1R11 - 26th July 2023
-q
+
 - updates to collections since galaxy updated
 - updates to audit
 

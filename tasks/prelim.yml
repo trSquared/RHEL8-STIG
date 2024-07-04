@@ -1,5 +1,100 @@
 ---
 
+- name: PRELIM | set bootloader type
+  block:
+      - name: "PRELIM | Check whether machine is UEFI-based"
+        ansible.builtin.stat:
+            path: /sys/firmware/efi
+        register: rhel8_efi_boot
+
+      - name: "PRELIM | set fact if UEFI boot"
+        ansible.builtin.set_fact:
+            rhel8stig_bootloader_path: /boot/efi/EFI/{{ ansible_distribution | lower }}
+            rhel8stig_legacy_boot: false
+        when:
+            - rhel8_efi_boot.stat.exists
+
+      - name: "PRELIM | set fact if UEFI boot | Oracle Linux"
+        ansible.builtin.set_fact:
+            rhel8stig_bootloader_path: /boot/efi/EFI/redhat
+            rhel8stig_legacy_boot: false
+        when:
+            - rhel8_efi_boot.stat.exists
+            - ansible_distribution == 'OracleLinux'
+
+      - name: "PRELIM | set if not UEFI boot"
+        ansible.builtin.set_fact:
+            rhel8stig_bootloader_path: /boot/grub2/
+            rhel8stig_legacy_boot: true
+        when: not rhel8_efi_boot.stat.exists
+
+      - name: PRELIM | output bootloader and efi state
+        ansible.builtin.debug:
+            msg:
+                - "bootloader path set to {{ rhel8stig_bootloader_path }}"
+                - "legacy boot equals {{ rhel8stig_legacy_boot }}"
+  tags:
+      - always
+
+- name: "PRELIM | Gather interactive user ID min"
+  block:
+      - name: "PRELIM | Gather interactive user ID min"
+        ansible.builtin.shell: grep ^UID_MIN /etc/login.defs | awk '{print $2}'
+        changed_when: false
+        failed_when: false
+        register: rhel8stig_min_uid
+
+      - name: "PRELIM | Gather interactive user ID max"
+        ansible.builtin.shell: grep ^UID_MAX /etc/login.defs | awk '{print $2}'
+        changed_when: false
+        failed_when: false
+        register: rhel8stig_max_uid
+
+      - name: "PRELIM | Setting the fact"
+        ansible.builtin.set_fact:
+            rhel8stig_interactive_uid_start: "{{ rhel8stig_min_uid.stdout | string }}"
+            rhel8stig_interactive_uid_stop: "{{ rhel8stig_max_uid.stdout | string }}"
+  tags:
+      - always
+
+- name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | set sssd.conf location"
+  block:
+      - name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | Get sssd.conf location"
+        ansible.builtin.stat:
+            path: "{{ rhel8stig_sssd_conf }}"
+        register: rhel8stig_sssd_conf_present
+
+      - name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | Get sssd.conf location | Warning if not found"
+        ansible.builtin.debug:
+            msg: "Warning!! The configured sssd config file {{ rhel8stig_sssd_conf }} has not been found, some items will skip"
+        changed_when: true
+        when:
+            - not rhel8stig_sssd_conf_present.stat.exists
+  when:
+      - rhel_08_010400 or
+        rhel_08_020090 or
+        rhel_08_020250 or
+        rhel_08_020290
+  tags:
+      - always
+
+- name: "PRELIM | Include audit specific variables"
+  ansible.builtin.include_vars: audit.yml
+  when:
+      - run_audit or audit_only
+      - setup_audit
+  tags:
+      - setup_audit
+      - run_audit
+
+- name: "PRELIM | Include pre-remediation audit tasks"
+  ansible.builtin.import_tasks: pre_remediation_audit.yml
+  when:
+      - run_audit or audit_only
+      - setup_audit
+  tags:
+      - run_audit
+
 - name: "PRELIM | RHEL-08-010020"
   block:
       - name: "PRELIM | RHEL-08-010020 | Check if /boot or /boot/efi reside on separate partitions"
@@ -49,7 +144,7 @@
             - "'dconf' not in ansible_facts.packages"
             - rhel8stig_gui
 
-      - name: dconf directory structure
+      - name: "PRELIM | dconf directory structure setup"
         ansible.builtin.file:
             path: /etc/dconf/db/local.d/locks
             state: directory
@@ -106,7 +201,7 @@
   tags:
       - always
 
-- name: ensure cronie is available
+- name: "PRELIM | ensure cronie is available"
   ansible.builtin.package:
       name: cronie
   when:
@@ -139,15 +234,39 @@
       - RHEL-08-010750
       - RHEL-08-020320
 
-- name: "PRELIM | RHEL-08-010690 Ensure user enumeration command is modified when autofs remote home directories are in use"
+- name: "PRELIM | AUDIT | Discover Interactive Users"
+  tags:
+      - always
+  ansible.builtin.shell: >
+      grep -E -v '^(root|halt|sync|shutdown)' /etc/passwd | awk -F: '(!index($7, "sbin/nologin") && $7 != "/bin/nologin" && $7 != "/bin/false") { print $1 }'
+  changed_when: false
+  register: discovered_interactive_usernames
+
+- name: "PRELIM | AUDIT | Discover Interactive User accounts home directories"
+  tags:
+      - always
+  ansible.builtin.shell: >
+      grep -E -v '^(root|halt|sync|shutdown)' /etc/passwd | awk -F: '(!index($7, "sbin/nologin") && $7 != "/bin/nologin" && $7 != "/bin/false") { print $6 }'
+  changed_when: false
+  register: discovered_interactive_users_home
+
+- name: "PRELIM | AUDIT | Discover Interactive user UIDs"
+  tags:
+      - always
+  ansible.builtin.shell: >
+      grep -E -v '^(root|halt|sync|shutdown)' /etc/passwd | awk -F: '(!index($7, "sbin/nologin") && $7 != "/bin/nologin" && $7 != "/bin/false") { print $3 }'
+  changed_when: false
+  register: discovered_interactive_uids
+
+- name: "PRELIM | RHEL-08-010690 | Ensure user enumeration command is modified when autofs remote home directories are in use"
   block:
-      - name: Ensure that rhel8stig_auto_mount_home_dirs_local_mount_point is defined and not length zero
+      - name: PRELIM | RHEL-08-010690 | AUDIT | Ensure that rhel8stig_auto_mount_home_dirs_local_mount_point is defined and not length zero
         ansible.builtin.assert:
             that:
                 - rhel8stig_auto_mount_home_dirs_local_mount_point is defined
                 - rhel8stig_auto_mount_home_dirs_local_mount_point | length > 0
 
-      - name: Modify local_interactive_user_dir_command to exclude remote automounted home directories
+      - name: PRELIM | RHEL-08-010690 | PATCH | Modify local_interactive_user_dir_command to exclude remote automounted home directories
         ansible.builtin.set_fact:
             local_interactive_user_dir_command: "{{ local_interactive_user_dir_command }} | grep -v '{{ rhel8stig_auto_mount_home_dirs_local_mount_point }}"
 
@@ -187,17 +306,6 @@
       - medium
       - RHEL-08-010070
       - RHEL-08-030010
-
-- name: "PRELIM | RHEL-08-010730 | RHEL-08-20352 | Get local interactive user home directories"
-  ansible.builtin.shell: ls -d $(awk -F':' '($3>=1000)&&($1!="nobody"){print $6}' /etc/passwd)
-  changed_when: false
-  failed_when: false
-  register: local_home_directories
-  when:
-      - rhel_08_010730 or
-        rhel_08_020352
-  tags:
-      - always
 
 - name: "PRELIM | RHEL-08-030620 | RHEL-08-030630 | RHEL-08-030640 | RHEL-08-030650 | Install audit remote plugin."
   ansible.builtin.package:
@@ -274,12 +382,12 @@
             state: "{{ rhel8stig_service_started }}"
             enabled: true
 
-      - name: PRELIM | check if ssh host key exists
+      - name: PRELIM | Check if ssh host key exists
         ansible.builtin.stat:
             path: /etc/ssh/ssh_host_rsa_key
         register: rhel8stig_ssh_host_rsa_key_stat
 
-      - name: PRELIM | create ssh host key to allow 'sshd -t -f %s' to succeed
+      - name: PRELIM | Create ssh host key to allow 'sshd -t -f %s' to succeed
         ansible.builtin.shell: ssh-keygen -N '' -f /etc/ssh/ssh_host_rsa_key -t rsa -b 4096
         when: not rhel8stig_ssh_host_rsa_key_stat.stat.exists
         notify: clean up ssh host key
@@ -302,7 +410,7 @@
       - RHEL-08-010770
       - complexity-high
 
-- name: "MEDIUM | RHEL-08-010660 | RHEL-08-010770 | Set fact for home directory paths for interactive users"
+- name: "PRELIM | RHEL-08-010660 | RHEL-08-010770 | Set fact for home directory paths for interactive users"
   ansible.builtin.set_fact:
       rhel_08_stig_interactive_homedir_inifiles: "{{ rhel_08_010770_ini_file_list.results | map(attribute='stdout_lines') | list }}"
   when:
@@ -315,94 +423,13 @@
       - RHEL-08-010770
       - complexity-high
 
-- name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | set sssd.conf location"
-  block:
-      - name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | Get sssd.conf location"
-        ansible.builtin.stat:
-            path: "{{ rhel8stig_sssd_conf }}"
-        register: rhel8stig_sssd_conf_present
-
-      - name: "PRELIM | RHEL-08-010400 | RHEL-08-020250 | RHEL-08-020290 | Get sssd.conf location | Warning if not found"
-        ansible.builtin.debug:
-            msg: "Warning!! The configured sssd config file {{ rhel8stig_sssd_conf }} has not been found, some items will skip"
-        changed_when: true
-        when:
-            - not rhel8stig_sssd_conf_present.stat.exists
-  when:
-      - rhel_08_010400 or
-        rhel_08_020090 or
-        rhel_08_020250 or
-        rhel_08_020290
-  tags:
-      - always
-
-- name: "PRELIM | Gather interactive user ID min"
-  block:
-      - name: "PRELIM | Gather interactive user ID min"
-        ansible.builtin.shell: grep ^UID_MIN /etc/login.defs | awk '{print $2}'
-        changed_when: false
-        failed_when: false
-        register: rhel8stig_min_uid
-
-      - name: "PRELIM | Gather interactive user ID max"
-        ansible.builtin.shell: grep ^UID_MAX /etc/login.defs | awk '{print $2}'
-        changed_when: false
-        failed_when: false
-        register: rhel8stig_max_uid
-
-      - name: "PRELIM | Setting the fact"
-        ansible.builtin.set_fact:
-            rhel8stig_interactive_uid_start: "{{ rhel8stig_min_uid.stdout | string }}"
-            rhel8stig_interactive_uid_stop: "{{ rhel8stig_max_uid.stdout | string }}"
-  tags:
-      - always
-
-- name: Gather the package facts
+- name: "PRELIM | Gather the package facts"
   ansible.builtin.package_facts:
       manager: auto
   tags:
       - always
 
-- name: "PRELIM | Check whether machine is UEFI-based"
-  ansible.builtin.stat:
-      path: /sys/firmware/efi
-  register: rhel8_efi_boot
-  tags:
-      - always
-      - goss_template
-
-- name: PRELIM | set bootloader type
-  block:
-      - name: "PRELIM | set fact if UEFI boot"
-        ansible.builtin.set_fact:
-            rhel8stig_bootloader_path: /boot/efi/EFI/{{ ansible_distribution | lower }}
-            rhel8stig_legacy_boot: false
-        when:
-            - rhel8_efi_boot.stat.exists
-
-      - name: "PRELIM | set fact if UEFI boot | Oracle Linux"
-        ansible.builtin.set_fact:
-            rhel8stig_bootloader_path: /boot/efi/EFI/redhat
-            rhel8stig_legacy_boot: false
-        when:
-            - rhel8_efi_boot.stat.exists
-            - ansible_distribution == 'Oracle Linux'
-
-      - name: "PRELIM | set if not UEFI boot"
-        ansible.builtin.set_fact:
-            rhel8stig_bootloader_path: /boot/grub2/
-            rhel8stig_legacy_boot: true
-        when: not rhel8_efi_boot.stat.exists
-
-      - name: PRELIM | output bootloader and efi state
-        ansible.builtin.debug:
-            msg:
-                - "bootloader path set to {{ rhel8stig_bootloader_path }}"
-                - "legacy boot equals {{ rhel8stig_legacy_boot }}"
-  tags:
-      - always
-
-- name: "PRELIM | RHEL-08-020017 | RHEL-08-020027 | REHL-08-020028 | If using selinux set up system prereqs"
+- name: "PRELIM | RHEL-08-020017 | RHEL-08-020027 | RHEL-08-020028 | If using selinux set up system prereqs"
   block:
       - name: "PRELIM | RHEL-08-020017 | Install policycoreutils-python-utils"
         ansible.builtin.package:
@@ -414,7 +441,7 @@
         ansible.builtin.file:
             path: "{{ rhel8stig_pam_faillock.dir }}"
             state: directory
-            mode: 0755
+            mode: '0755'
             owner: root
             group: root
             recurse: true
